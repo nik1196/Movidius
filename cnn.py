@@ -3,12 +3,12 @@ import tensorflow as tf, numpy as np, imageio, matplotlib.pyplot as plt, cv2, tr
 """
 Convolutional Layer with Max Pooling and Local Response Normalization
 """
-def conv_layer(in_layer,out_chan,size,sigma=0.01,b=0.0,strd=[1,1,1,1],pool=True):
+def conv_layer(in_layer,out_chan,size,sigma=0.01,b=0.0,strd=[1,2,2,1],pool=True):
     in_chan = in_layer.shape.as_list()[3]
     w = tf.Variable(tf.truncated_normal([size,size,in_chan,out_chan],stddev=sigma))
     b = tf.Variable(tf.constant(b, shape=[out_chan]))
     h = tf.nn.relu(tf.nn.conv2d(in_layer, w, strides=strd,padding='VALID')+b)
-    p = tf.nn.max_pool(h,ksize = [1,2,2,1], strides = [1,2,2,1], padding='VALID')
+    p = tf.nn.max_pool(h,ksize = [1,1,1,1], strides = strd, padding='VALID')
     n = tf.nn.local_response_normalization(p, depth_radius=min(4,out_chan-2))
     n1 = tf.nn.local_response_normalization(h,depth_radius=min(4,out_chan-2))
     if pool:
@@ -44,9 +44,9 @@ y = tf.placeholder(tf.float32, shape=[None,101])
 learning_rate = tf.placeholder(tf.float32)
 keep_prob = tf.placeholder(tf.float32)
 x_img = tf.reshape(x,[-1,32,32,1])
-w1,b1,h1,p1,n1 = conv_layer(x_img,64,4)
-w2,b2,h2,p2,n2 = conv_layer(n1,32,2)
-w3,b3,h3,p3,n3 = conv_layer(n2,16,4)
+w1,b1,h1,p1,n1 = conv_layer(x_img,64,4,strd=[1,1,1,1])
+w2,b2,h2,p2,n2 = conv_layer(n1,32,2, strd=[1,1,1,1])
+w3,b3,h3,p3,n3 = conv_layer(n2,16,4, strd=[1,1,1,1])
 w4,b4,h4,r4 = conn_layer(n3,1024)
 h4_drop = tf.nn.dropout(h4,keep_prob)
 w5,b5,h5,r5 = conn_layer(h4_drop,512)
@@ -87,7 +87,7 @@ def visualize_layer(layer,sess):
         ch = min(3,img.shape[2])
         img = img[:,:,:ch]
     ip = cv2.resize(img,(128,128),interpolation=cv2.INTER_AREA).reshape(128*128*ch)
-    unit = sess.run(layer,feed_dict = {x:[ip]})
+    #unit = sess.run(layer,feed_dict = {x:[ip]})
 ##    m = unit[0][0][0][0]
 ##    for i in range(unit.shape[0]):
 ##        for j in range(unit.shape[1]):
@@ -98,6 +98,23 @@ def visualize_layer(layer,sess):
     cv2.imshow('frame',unit[0,:,:,:3])
     cv2.waitKey(1)
 
+def visualize_layer_h5(layer,sess, img):
+    ch = 1
+##    if len(img.shape) > 2:
+##        ch = min(3,img.shape[2])
+##        img = img[:,:,:ch]
+    img = np.reshape(img, [32*32*1])
+    unit = sess.run(layer,feed_dict = {x:[img]})
+    m = unit[0][0][0][0]
+    for i in range(unit.shape[0]):
+        for j in range(unit.shape[1]):
+            for k in range(unit.shape[2]):
+                for l in range(unit.shape[3]):
+                    m = max(m,unit[i][j][k][l])
+    unit = unit*255/m
+    cv2.imshow('frame',unit[0,:,:,:3])
+
+    cv2.waitKey(1)
 
 """
 check validation accuracy
@@ -188,6 +205,7 @@ def train(epochs,batch_sz,epsilon,net_loader,reload):
                 train_step.run(feed_dict={x:ip[0],y:ip[1],learning_rate:epsilon,keep_prob:0.5})
                 l += loss.eval(feed_dict={x:ip[0],y:ip[1],keep_prob:1.0})
                 a += np.mean(correct_prediction.eval(feed_dict={x:ip[0],y:ip[1],keep_prob:1.0}))
+                #visualize_layer_h5(h1,sess, net_loader.train_data['images'][0])
             l /= net_loader.train_size/batch_sz
             a /= net_loader.train_size/batch_sz
             print("Train loss: ",l)
@@ -208,6 +226,7 @@ def train(epochs,batch_sz,epsilon,net_loader,reload):
                     acc_file.close()
                 acc.append(a)
                 ls2.append(l)
+            
         a,l = validate(net_loader,sess,True)
 ##        save_path = saver.save(sess, net_loader.model_dir+ckpt)
 ##        print('Model saved at ', save_path)
