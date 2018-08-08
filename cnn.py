@@ -130,14 +130,15 @@ def validate(net_loader,sess,test=False):
         else:
             for i in range(0,test_data['images'].shape[0],step):
                 #print(file, lab)
-                ip = net_loader.get_single_img(test_data['images'][i])
-                lab = i%1000
+                lab = [0 for k in range(101)]
+                ip = net_loader.get_single_img_h5(i)
+                lab[i//1000] = 1
                 #print('predicted: ',np.argmax(sess.run(y_,feed_dict={x:[ip],keep_prob:1.0})))
                 #print('actual: ',np.argmax(lab), ' ',lab)
                 acc += correct_prediction.eval(feed_dict={x:[ip],y:[lab],keep_prob:1.0})
                 ls2 += loss.eval(feed_dict={x:[ip], y:[lab], keep_prob:1.0})
-            acc /= len(test_data['images'].shape[0])/step
-            ls2 /= len(test_data['images'].shape[0])/step
+            acc /= (test_data['images'].shape[0])/step
+            ls2 /= (test_data['images'].shape[0])/step
             print(out_str,ls2, '; test acc: ',acc)
             return acc,ls2
     except:
