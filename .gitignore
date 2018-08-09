@@ -2,3 +2,5 @@ Data/
 Extra/
 __pycache__/
 Images/
+Models/
+.idea/

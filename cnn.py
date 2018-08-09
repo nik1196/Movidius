@@ -1,14 +1,15 @@
 import tensorflow as tf, numpy as np, imageio, matplotlib.pyplot as plt, cv2, traceback, os
 
+ckpt = 'model1.ckpt'
 """
 Convolutional Layer with Max Pooling and Local Response Normalization
 """
-def conv_layer(in_layer,out_chan,size,sigma=0.01,b=0.0,strd=[1,2,2,1],pool=True):
+def conv_layer(in_layer,out_chan,size,sigma=0.01,b=0.01, cstrd = [1,2,2,1], kstrd=[1,1,1,1],pool=True):
     in_chan = in_layer.shape.as_list()[3]
     w = tf.Variable(tf.truncated_normal([size,size,in_chan,out_chan],stddev=sigma))
     b = tf.Variable(tf.constant(b, shape=[out_chan]))
-    h = tf.nn.relu(tf.nn.conv2d(in_layer, w, strides=strd,padding='VALID')+b)
-    p = tf.nn.max_pool(h,ksize = [1,1,1,1], strides = strd, padding='VALID')
+    h = tf.nn.relu(tf.nn.conv2d(in_layer, w, strides= cstrd,padding='VALID')+b)
+    p = tf.nn.max_pool(h,ksize = [1,2,2,1], strides = kstrd, padding='VALID')
     n = tf.nn.local_response_normalization(p, depth_radius=min(4,out_chan-2))
     n1 = tf.nn.local_response_normalization(h,depth_radius=min(4,out_chan-2))
     if pool:
@@ -19,7 +20,7 @@ def conv_layer(in_layer,out_chan,size,sigma=0.01,b=0.0,strd=[1,2,2,1],pool=True)
 """
 Fully Connected Layer
 """
-def conn_layer(in_layer,out_nodes,op_layer=False,sigma=0.01,b=0.0):
+def conn_layer(in_layer,out_nodes,op_layer=False,sigma=0.01,b=0.01):
     i_s = in_layer.shape.as_list()
     #print(i_s)
     in_layer2 = in_layer
@@ -44,21 +45,23 @@ y = tf.placeholder(tf.float32, shape=[None,101])
 learning_rate = tf.placeholder(tf.float32)
 keep_prob = tf.placeholder(tf.float32)
 x_img = tf.reshape(x,[-1,32,32,1])
-w1,b1,h1,p1,n1 = conv_layer(x_img,64,4,strd=[1,1,1,1])
-w2,b2,h2,p2,n2 = conv_layer(n1,32,2, strd=[1,1,1,1])
-w3,b3,h3,p3,n3 = conv_layer(n2,16,4, strd=[1,1,1,1])
-w4,b4,h4,r4 = conn_layer(n3,1024)
-h4_drop = tf.nn.dropout(h4,keep_prob)
-w5,b5,h5,r5 = conn_layer(h4_drop,512)
-h5_drop = tf.nn.dropout(h5,keep_prob)
-w6,b6,y_,r6 = conn_layer(h5_drop,101,op_layer=True)
+w1,b1,h1,p1,n1 = conv_layer(x_img,256,8,cstrd=[1,1,1,1])
+w2,b2,h2,p2,n2 = conv_layer(p1,64,8,cstrd=[1,1,1,1])
+w3,b3,h3,p3,n3 = conv_layer(p2,16,4,cstrd=[1,1,1,1])
+w4,b4,h4,p4,n4 = conv_layer(p3,4,2,cstrd=[1,1,1,1])
+w5,b5,h5,p5,n5 = conv_layer(p4,16,4,cstrd=[1,1,1,1])
+w6,b6,h6,r6 = conn_layer(p5,1024)
+h6_drop = tf.nn.dropout(h6,keep_prob)
+w7,b7,h7,r7 = conn_layer(h6_drop,512)
+h7_drop = tf.nn.dropout(h7,keep_prob)
+w8,b8,y_,r8 = conn_layer(h7_drop,101,op_layer=True)
 
 
 """
 Loss function: Softmax Cross Entropy
 """
 loss0 = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=y_))
-reg = r4+r5+r6
+reg = r8+r7+r6
 loss = loss0 + 0.01*reg
 
 """
@@ -87,7 +90,7 @@ def visualize_layer(layer,sess):
         ch = min(3,img.shape[2])
         img = img[:,:,:ch]
     ip = cv2.resize(img,(128,128),interpolation=cv2.INTER_AREA).reshape(128*128*ch)
-    #unit = sess.run(layer,feed_dict = {x:[ip]})
+    unit = sess.run(layer,feed_dict = {x:[ip]})
 ##    m = unit[0][0][0][0]
 ##    for i in range(unit.shape[0]):
 ##        for j in range(unit.shape[1]):
@@ -154,12 +157,24 @@ def validate(net_loader,sess,test=False):
                 #print('actual: ',np.argmax(lab), ' ',lab)
                 acc += correct_prediction.eval(feed_dict={x:[ip],y:[lab],keep_prob:1.0})
                 ls2 += loss.eval(feed_dict={x:[ip], y:[lab], keep_prob:1.0})
-            acc /= (test_data['images'].shape[0])/step
-            ls2 /= (test_data['images'].shape[0])/step
+                visualize_layer_h5(h1,sess, net_loader.train_data['images'][0])
+            acc /= (test_data['images'].shape[0])
+            acc *= step
+            ls2 /= (test_data['images'].shape[0])
+            ls2 *= step
             print(out_str,ls2, '; test acc: ',acc)
             return acc,ls2
     except:
         traceback.print_exc()
+
+def run_validate(net_loader):
+    with tf.Session() as sess:
+        try:
+            saver.restore(sess, net_loader.model_dir + ckpt)
+            print("Model reloaded successfully.")
+            validate(net_loader, sess)
+        except tf.errors.NotFoundError:
+            print("Model " + ckpt + " not found, will create new file")
 
 """ 
 Train the model. Inputs: number of epochs, learning rate, train and test data, and whether to continue training model or start afresh
@@ -171,7 +186,7 @@ def train(epochs,batch_sz,epsilon,net_loader,reload):
     acc = []
     with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
         sess.run(tf.global_variables_initializer())
-        ckpt = 'model1.ckpt'
+
         acc_file = []
         prev_acc = -1
         prev_ls = 999999999
@@ -198,6 +213,7 @@ def train(epochs,batch_sz,epsilon,net_loader,reload):
             l = 0
             a = 0
             for b in range(0,net_loader.train_size,batch_sz):
+                print(b)
                 if net_loader.h5 == 'True':
                     ip = net_loader.get_batch_random_h5(batch_sz)
                 else:
@@ -252,13 +268,15 @@ def test(net_loader):
         if net_loader.h5 == 'True':
             for file, lab in net_loader.test_data:
                 img = net_loader.get_single_img_h5(file)
-            #cv2.imshow('frame',sess.run(p1,feed_dict={x:[img]})[0,:,:,:3])
-            #cv2.waitKey(1)
+                cv2.imshow('frame',sess.run(p1,feed_dict={x:[img]})[0,:,:,:3])
+                cv2.waitKey(1)
                 acc += correct_prediction.eval(feed_dict={x:[img], y:[lab],keep_prob:1.0})
             acc/=net_loader.test_size
         else:
             for i in range(net_loader.test_data['images'].shape[0]):
-                img = net_loader.get_single_img_h5[i]
+                img = net_loader.get_single_img_h5(i)
+                cv2.imshow('frame', sess.run(p1, feed_dict={x: [img]})[0, :, :, :3])
+                cv2.waitKey(1)
                 acc += correct_prediction.eval(feed_dict={x:[img], y:[lab],keep_prob:1.0})
             acc/=net_loader.test_size                
     print(acc)
