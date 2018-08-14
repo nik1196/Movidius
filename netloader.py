@@ -135,6 +135,8 @@ class NetLoader:
             lab = [0 for i in range(101)]
             j = random.randint(0,self.train_size-1)
             while j in self.files_read:
+                if len(self.files_read) == self.train_size:
+                    break
                 j = random.randint(0,self.train_size-1)
             img = self.train_data['images'][j]
             ch = 1
@@ -142,10 +144,13 @@ class NetLoader:
                 ch = min(3,img.shape[2])
                 img = img[:,:,:ch]
             train_array.append(img.reshape(32*32*ch))
-            lab[j//1000] = 1
+            lab[j//101] = 1
+            #print(j//100)
             train_labels.append(lab)
-            if len(self.files_read) == self.train_size:
-                self.files_read = {}
+            self.files_read[j] = 1
+        if len(self.files_read) == self.train_size:
+            self.files_read = {}
+        #print(",", len(self.files_read), " ", self.train_size)
         return [train_array, train_labels]
 
     def get_single_img(self,file):

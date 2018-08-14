@@ -5,12 +5,13 @@ ckpt = 'model1.ckpt'
 Convolutional Layer with Max Pooling and Local Response Normalization
 """
 
-def conv_layer(in_layer,out_chan,size,sigma=0.1,b=0.0, cstrd = [1,2,2,1], kstrd=[1,1,1,1],pool=True):
+def conv_layer(in_layer,out_chan,size,sigma=0.1,b=0.0, cstrd = [1,2,2,1], kstrd=[1,1,1,1],pool=True, padding='VAILD'):
     in_chan = in_layer.shape.as_list()[3]
     w = tf.Variable(tf.truncated_normal([size,size,in_chan,out_chan],stddev=sigma))
     b = tf.Variable(tf.constant(b, shape=[out_chan]))
-    h = tf.nn.relu(tf.nn.conv2d(in_layer, w, strides= cstrd,padding='VALID')+b)
-    p = tf.nn.max_pool(h,ksize = [1,2,2,1], strides = kstrd, padding='VALID')
+    h_ = tf.nn.conv2d(in_layer, w, strides= cstrd,padding=padding)+b
+    h = tf.nn.relu(h_)
+    p = tf.nn.max_pool(h, ksize=[1, 2, 2, 1], strides=kstrd, padding=padding)
     n = tf.nn.local_response_normalization(p, depth_radius=min(4,out_chan-2))
     n1 = tf.nn.local_response_normalization(h,depth_radius=min(4,out_chan-2))
     if pool:
@@ -38,7 +39,14 @@ def conn_layer(in_layer,out_nodes,op_layer=False,sigma=0.1,b=0.0):
     r = tf.nn.l2_loss(w)
     return w,b,h,r
 
+def conv_layer_stack(in_layer, pad=['SAME','SAME','SAME','SAME','SAME']):
+    w1, b1, h1, p1, n1 = conv_layer(in_layer,16,2,cstrd=[1,1,1,1],padding=pad[0])
+    w2, b2, h2, p2, n2 = conv_layer(p1, 32, 4, cstrd=[1, 1, 1, 1], padding=pad[1])
+    w3, b3, h3, p3, n3 = conv_layer(p2, 16, 8, cstrd=[1, 1, 1, 1],padding=pad[2])
+    w4, b4, h4, p4, n4 = conv_layer(p3, 8, 4, cstrd=[1, 1, 1, 1],padding=pad[3])
+    w5, b5, h5, p5, n5 = conv_layer(p4, 4, 2, cstrd=[1, 1, 1, 1],padding=pad[4])
 
+    return w5, b5, h5, p5, n5
 """
 The architecture: 3 conv layers and  2 fc layers with dropout
 """
@@ -47,12 +55,18 @@ y = tf.placeholder(tf.float32, shape=[None,101])
 learning_rate = tf.placeholder(tf.float32)
 keep_prob = tf.placeholder(tf.float32)
 x_img = tf.reshape(x,[-1,32,32,1])
-w1,b1,h1,p1,n1 = conv_layer(x_img,128,2,cstrd=[1,1,1,1])
-w2,b2,h2,p2,n2 = conv_layer(h1,64,8,cstrd=[1,1,1,1])
-w3,b3,h3,p3,n3 = conv_layer(h2,32,4,cstrd=[1,1,1,1])
-w4,b4,h4,p4,n4 = conv_layer(h3,16,4,cstrd=[1,1,1,1])
-w5,b5,h5,p5,n5 = conv_layer(h4,8,2,cstrd=[1,1,1,1])
-w6,b6,h6,r6 = conn_layer(h2,1024)
+# w1,b1,h1,p1,n1 = conv_layer(x_img,64,2,cstrd=[1,1,1,1])
+# w2,b2,h2,p2,n2 = conv_layer(p1,32,4,cstrd=[1,1,1,1])
+# w3,b3,h3,p3,n3 = conv_layer(p2,16,4,cstrd=[1,1,1,1])
+# w4,b4,h4,p4,n4 = conv_layer(p3,8,4,cstrd=[1,1,1,1])
+# w5,b5,h5,p5,n5 = conv_layer(p4,4,4,cstrd=[1,1,1,1])
+
+w1,b1,h1,p1,n1 = conv_layer_stack(x_img, pad=['VALID','SAME','SAME','SAME','SAME'])
+w2,b2,h2,p2,n2 = conv_layer_stack(p1)
+w3,b3,h3,p3,n3 = conv_layer_stack(p2)
+w4,b4,h4,p4,n4 = conv_layer_stack(p3)
+w5,b5,h5,p5,n5 = conv_layer_stack(p4)
+w6,b6,h6,r6 = conn_layer(p1,1024)
 h6_drop = tf.nn.dropout(h6,keep_prob)
 w7,b7,h7,r7 = conn_layer(h6_drop,512)
 h7_drop = tf.nn.dropout(h7,keep_prob)
@@ -66,21 +80,23 @@ loss0 = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=
 reg = r8+r7+r6
 loss = loss0 + 0.00*reg
 
+optimizer = tf.train.AdamOptimizer(learning_rate)
+grads_and_vars = optimizer.compute_gradients(loss)
 """
 Adaptive moments for training
 """
-train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+train_step = optimizer.minimize(loss)
 
 
 """
 Compare predicted classes vs actual classes
 """
-correct_prediction = tf.cast(tf.equal(tf.argmax(y,1),tf.argmax(y_,1)),tf.float32)
+correct_prediction = tf.cast(tf.equal(tf.argmax(y,1),tf.argmax(y_,1)), tf.float32)
 
 """
 Saver object to save and restore variables
 """
-saver = tf.train.Saver({'w1':w1,'b1':b1,'w2':w2,'b2':b2,'w3':w3,'b3':b3,'w4':w4,'b4':b4,'w5':w5,'b5':b5,'w6':w6,'b6':b6})
+saver = tf.train.Saver({'w1':w1,'b1':b1,'w2':w2,'b2':b2,'w3':w3,'b3':b3,'w4':w4,'b4':b4,'w5':w5,'b5':b5,'w6':w6,'b6':b6, 'w7':w7, 'b7':b7, 'w8':w8, 'b8':b8})
 
 """
 Visualize output of a convolutional layer
@@ -111,12 +127,13 @@ def visualize_layer_h5(layer,sess, img):
     img1 = np.reshape(img, [32*32*1])
     unit = sess.run(layer,feed_dict = {x:[img1]})
     m = unit[0][0][0][0]
-    for i in range(unit.shape[0]):
+    for i in range(1):
         for j in range(unit.shape[1]):
             for k in range(unit.shape[2]):
                 for l in range(unit.shape[3]):
                     m = max(m,unit[i][j][k][l])
-    unit = unit*255/m
+    unit = unit * 255/m
+    unit = 1 / (1 + np.exp(-unit))
     cv2.imshow('frame',unit[0,:,:,:3])
 
     cv2.waitKey(1)
@@ -131,35 +148,38 @@ def validate(net_loader,sess,test=False):
     ls_t = 0
     test_data  = net_loader.test_data
     step = 1
-    out_str = 'validation loss:'
-    if test == True:
+    out_str = 'test loss:'
+    if test == False:
         step = 4
-        out_str = 'test loss:'
+        out_str = 'validation loss:'
+        out_str2 = 'validation acc:'
     try:
         if net_loader.h5 == 'False':
             for i in range(0,len(test_data),step):
                 #print(file, lab)
                 ip = net_loader.get_single_img(test_data[i][0])
                 lab = test_data[i][1]
-                #print('predicted: ',np.argmax(sess.run(y_,feed_dict={x:[ip],keep_prob:1.0})))
-                #print('actual: ',np.argmax(lab), ' ',lab)
+                print('predicted: ',np.argmax(sess.run(y_,feed_dict={x:[ip],keep_prob:1.0})))
+                print('actual: ',lab)
                 acc += correct_prediction.eval(feed_dict={x:[ip],y:[lab],keep_prob:1.0})
                 ls2 += loss.eval(feed_dict={x:[ip], y:[lab], keep_prob:1.0})
             acc /= len(test_data)/step
             ls2 /= len(test_data)/step
-            print(out_str,ls2, '; test acc: ',acc)
+            print(out_str,ls2, out_str2,acc)
             return acc,ls2
         else:
+            print("validation/testing")
             for i in range(0,test_data['images'].shape[0],step):
                 #print(file, lab)
                 lab = [0 for k in range(101)]
                 ip = net_loader.get_single_img_h5(i)
-                lab[i//1000] = 1
-                #print('predicted: ',np.argmax(sess.run(y_,feed_dict={x:[ip],keep_prob:1.0})))
-                #print('actual: ',np.argmax(lab), ' ',lab)
+                lab[i//10] = 1
+                #print(lab)
+                print('predicted: ',np.argmax(sess.run(y_,feed_dict={x:[ip],keep_prob:1.0})))
+                print('actual: ',np.argmax([lab],1))
                 acc += correct_prediction.eval(feed_dict={x:[ip],y:[lab],keep_prob:1.0})
                 ls2 += loss.eval(feed_dict={x:[ip], y:[lab], keep_prob:1.0})
-                visualize_layer_h5(h2,sess, net_loader.train_data['images'][i])
+                #visualize_layer_h5(h1,sess, net_loader.train_data['images'][i])
             acc /= (test_data['images'].shape[0])
             acc *= step
             ls2 /= (test_data['images'].shape[0])
@@ -216,15 +236,18 @@ def train(epochs,batch_sz,epsilon,net_loader,reload):
             a = 0
             for b in range(0,net_loader.train_size,batch_sz):
                 print(b)
-                visualize_layer_h5(h2,sess, net_loader.train_data['images'][0])
+                #visualize_layer_h5(p5,sess, net_loader.train_data['images'][0])
                 if net_loader.h5 == 'True':
                     ip = net_loader.get_batch_random_h5(batch_sz)
                 else:
                      ip = net_loader.get_batch_random(batch_sz)
+                print(str(sess.run(grads_and_vars[0][0], feed_dict={x: ip[0], y: ip[1], keep_prob: 1.0})) + " - " + grads_and_vars[0][1].name)
                 train_step.run(feed_dict={x:ip[0],y:ip[1],learning_rate:epsilon,keep_prob:0.5})
+
+                #print('predicted: ', np.argmax(sess.run(y_,feed_dict={x:ip[0],keep_prob:1.0}),1))
+                #print('actual: ',np.argmax(ip[1],1))
                 l += loss.eval(feed_dict={x:ip[0],y:ip[1],keep_prob:1.0})
                 a += np.mean(correct_prediction.eval(feed_dict={x:ip[0],y:ip[1],keep_prob:1.0}))
-                #visualize_layer_h5(h1,sess, net_loader.train_data['images'][0])
             l /= net_loader.train_size/batch_sz
             a /= net_loader.train_size/batch_sz
             print("Train loss: ",l)
