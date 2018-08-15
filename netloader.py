@@ -15,6 +15,7 @@ class NetLoader:
         self.train_data = []
         self.test_data = []
         self.h5 = h5
+        self.img_dim = 0
         i = 0
         for dirname,dirnames,filenames in os.walk(self.train_dir):
             if dirname != self.train_dir:
@@ -42,26 +43,26 @@ class NetLoader:
             self.create_data_h5()
 
     def create_data_h5(self):
-        for dirname, dirnames, filenames in os.walk(self.train_dir):
-            i = 0
-            ch = 1
-            print("Select train set")
-            for filename in filenames:
-                print(i, ". ", filename)
-                i += 1
+        # for dirname, dirnames, filenames in os.walk(self.train_dir):
+        #     i = 0
+        #     ch = 1
+        #     print("Select train set")
+        #     for filename in filenames:
+        #         print(i, ". ", filename)
+        #         i += 1
             #input(ch)
-            self.train_data = h5py.File(os.path.join(dirname, filenames[ch]), 'r')
-            self.train_size = self.train_data['images'].shape[0]
-        for dirname, dirnames, filenames in os.walk(self.test_dir):
-            i = 0
-            ch = 2
-            print("Select test set")
-            for filename in filenames:
-                print(i, ". ", filename)
-                i += 1
+        self.train_data = h5py.File(self.train_dir + '/food_c101_n10099_r64x64x1.h5', 'r')
+        self.train_size = self.train_data['images'].shape[0]
+        # for dirname, dirnames, filenames in os.walk(self.test_dir):
+        #     i = 0
+        #     ch = 2
+        #     print("Select test set")
+        #     for filename in filenames:
+        #         print(i, ". ", filename)
+        #         i += 1
             #input(ch)
-            self.test_data = h5py.File(os.path.join(dirname, filenames[ch]), 'r')
-            self.test_size = self.test_data['images'].shape[0]
+        self.test_data = h5py.File(self.test_dir + '/food_test_c101_n1000_r64x64x1.h5', 'r')
+        self.test_size = self.test_data['images'].shape[0]
         print('train data imgs: ', self.train_size)
         print('test data imgs: ', self.test_size)
 
@@ -122,7 +123,7 @@ class NetLoader:
             if len(img.shape) > 2:
                 ch = min(3,img.shape[2])
             img = img[:,:,:ch]
-            train_array.append(img.reshape(32*32*ch))    
+            train_array.append(img.reshape(64*64*ch))
             train_labels.append(self.train_data[j][1])
             if len(self.files_read) == self.train_size:
                 self.files_read = {}
@@ -143,7 +144,7 @@ class NetLoader:
             if len(img.shape) > 2:
                 ch = min(3,img.shape[2])
                 img = img[:,:,:ch]
-            train_array.append(img.reshape(32*32*ch))
+            train_array.append(img.reshape(64*64*ch))
             lab[j//101] = 1
             #print(j//100)
             train_labels.append(lab)
@@ -159,7 +160,7 @@ class NetLoader:
         if len(img.shape) > 2:
             ch = min(3,img.shape[2])
             img = img[:,:,:ch]
-        ip = img.reshape(32*32*ch)
+        ip = img.reshape(64*64*ch)
         return ip
             
     def get_single_img_h5(self,file):
@@ -169,7 +170,7 @@ class NetLoader:
             if img.shape[2] > 1:
                 ch = min(3,img.shape[2])
                 img = img[:,:,:ch]
-        ip = img.reshape(32*32*ch)
+        ip = img.reshape(64*64*ch)
         return ip        
 
     
